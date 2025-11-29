@@ -35,28 +35,25 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
 
-    - name: Build with Gradle
-      run: ./gradlew build
-
     - name: Check build.gradle version changed since previous release
       id: check_version
       shell: bash
       run: |
         set -euo pipefail
 
-        echo "Current release tag: ${GITHUB_REF#refs/tags/}"
         current_tag="${GITHUB_REF#refs/tags/}"
+        echo "Checking versions for tag: $current_tag"
 
-        # Ensure we have all tags and history
-        git fetch --tags --prune --unshallow || true
+        # Ensure all tags and history are available
+        git fetch --tags --prune || true
 
-        # Read version in current build.gradle
-        current_version=$(sed -n "s/^[[:space:]]*version[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" build.gradle | head -n1 || true)
+        # Read version in the current tag's build.gradle
+        current_version=$(git show "$current_tag":build.gradle 2>/dev/null | sed -n "s/^[[:space:]]*version[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" | head -n1 || true)
         current_version="$(echo "$current_version" | sed 's/^v//')"
 
-        echo "version in build.gradle at current tag: $current_version"
+        echo "version in build.gradle at current tag: ${current_version:-<not found>}"
 
-        # Find the previous-most tag (by creation date) that is NOT the current one
+        # Find the previous tag (most recently created tag that's not current)
         previous_tag=$(git for-each-ref --sort=-creatordate --format '%(refname:short)' refs/tags | awk -v cur="$current_tag" '$0!=cur{print; exit}') || true
 
         if [ -z "$previous_tag" ]; then
@@ -67,11 +64,11 @@ jobs:
 
         echo "Previous tag found: $previous_tag"
 
-        # Read version from previous tag's build.gradle
+        # Read version in previous tag's build.gradle
         prev_version=$(git show "$previous_tag":build.gradle 2>/dev/null | sed -n "s/^[[:space:]]*version[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" | head -n1 || true)
         prev_version="$(echo "$prev_version" | sed 's/^v//')"
 
-        echo "version in build.gradle at previous tag ($previous_tag): $prev_version"
+        echo "version in build.gradle at previous tag ($previous_tag): ${prev_version:-<not found>}"
 
         if [ -z "$current_version" ]; then
           echo "No version found in current build.gradle — skipping publish"
@@ -86,6 +83,10 @@ jobs:
           echo "version has NOT changed ($current_version) — skipping publish"
           echo "publish=false" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Build with Gradle
+      if: steps.check_version.outputs.publish == 'true'
+      run: ./gradlew build
 
     # The USERNAME and TOKEN need to correspond to the credentials environment variables used in
     # the publishing section of your build.gradle
