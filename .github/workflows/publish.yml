@@ -1,98 +1,112 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-# This workflow will build a package using Gradle and then publish it to GitHub packages when a release is created
-# For more information see: https://github.com/actions/setup-java/blob/main/docs/advanced-usage.md#Publishing-using-gradle
-
-name: Gradle Package
+name: Publish Release
 
 on:
-  release:
-    types: [created]
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'build.gradle' # Optimization: Only trigger if build.gradle is modified
+  # Add this to allow manual triggering from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-
+  # 1. Check if the version in build.gradle is new
+  check-version:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-    - name: Checkout repository (all history + tags)
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-    - name: Set up JDK 21
-      uses: actions/setup-java@v4
-      with:
-        java-version: '21'
-        distribution: 'temurin'
-        server-id: github # Value of the distributionManagement/repository/id field of the pom.xml
-        settings-path: ${{ github.workspace }} # location for the settings.xml file
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for tags
 
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+      - name: Extract Version from Gradle
+        id: version
+        run: |
+          # Grabs the version string (e.g., '1.0.0') from build.gradle
+          VERSION=$(grep "^version =" build.gradle | awk -F"'" '{print $2}')
+          echo "Detected version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-    - name: Check build.gradle version changed since previous release
-      id: check_version
-      shell: bash
-      run: |
-        set -euo pipefail
+      - name: Check if Tag Exists
+        id: check
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          TAG="v$VERSION"
+          
+          # Check if git tag exists locally or remote
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists. Skipping release."
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Tag $TAG does not exist. Proceeding with release."
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
 
-        current_tag="${GITHUB_REF#refs/tags/}"
-        echo "Checking versions for tag: $current_tag"
+  # 2. Create the GitHub Release draft
+  create-release:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: Version ${{ needs.check-version.outputs.version }}
+          draft: false
+          prerelease: false
 
-        # Ensure all tags and history are available
-        git fetch --tags --prune || true
+  # 3. Build and Upload Installers on all OSs
+  build-and-upload:
+    needs: [check-version, create-release]
+    if: needs.check-version.outputs.should_release == 'true'
+    strategy:
+      matrix:
+        include:
+          # Linux Configuration
+          - os: ubuntu-latest
+            command: ./gradlew jpackage
+            file_pattern: build/jpackage/*.deb
+          
+          # macOS Configuration
+          - os: macos-latest
+            command: ./gradlew jpackage
+            file_pattern: build/jpackage/*.dmg
+          
+          # Windows Configuration
+          - os: windows-latest
+            command: ./gradlew jpackage
+            file_pattern: build/jpackage/*.exe
 
-        # Read version in the current tag's build.gradle
-        current_version=$(git show "$current_tag":build.gradle 2>/dev/null | sed -n "s/^[[:space:]]*version[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" | head -n1 || true)
-        current_version="$(echo "$current_version" | sed 's/^v//')"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
 
-        echo "version in build.gradle at current tag: ${current_version:-<not found>}"
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
 
-        # Find the previous tag (most recently created tag that's not current)
-        previous_tag=$(git for-each-ref --sort=-creatordate --format '%(refname:short)' refs/tags | awk -v cur="$current_tag" '$0!=cur{print; exit}') || true
+      - name: Grant Execute Permission (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x gradlew
 
-        if [ -z "$previous_tag" ]; then
-          echo "No previous tag found — treating as first release and will publish."
-          echo "publish=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
+      - name: Build Installer
+        run: ${{ matrix.command }}
 
-        echo "Previous tag found: $previous_tag"
-
-        # Read version in previous tag's build.gradle
-        prev_version=$(git show "$previous_tag":build.gradle 2>/dev/null | sed -n "s/^[[:space:]]*version[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" | head -n1 || true)
-        prev_version="$(echo "$prev_version" | sed 's/^v//')"
-
-        echo "version in build.gradle at previous tag ($previous_tag): ${prev_version:-<not found>}"
-
-        if [ -z "$current_version" ]; then
-          echo "No version found in current build.gradle — skipping publish"
-          echo "publish=false" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-
-        if [ "$current_version" != "$prev_version" ]; then
-          echo "version changed ($prev_version -> $current_version) — publishing"
-          echo "publish=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "version has NOT changed ($current_version) — skipping publish"
-          echo "publish=false" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Build with Gradle
-      if: steps.check_version.outputs.publish == 'true'
-      run: ./gradlew build
-
-    # The USERNAME and TOKEN need to correspond to the credentials environment variables used in
-    # the publishing section of your build.gradle
-    - name: Publish to GitHub Packages
-      if: steps.check_version.outputs.publish == 'true'
-      run: ./gradlew publish
-      env:
-        USERNAME: ${{ github.actor }}
-        TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          files: ${{ matrix.file_pattern }}
