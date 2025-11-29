@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.web.WebView?>
+<?import javafx.geometry.Insets?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1" fx:controller="com.teieditor.controller.EditorController">
+    <top>
+        <VBox>
+            <MenuBar>
+                <menus>
+                    <Menu text="File">
+                        <items>
+                            <MenuItem text="New" onAction="#handleNew" accelerator="Shortcut+N"/>
+                            <MenuItem text="Open..." onAction="#handleOpen" accelerator="Shortcut+O"/>
+                            <MenuItem text="Save" onAction="#handleSave" accelerator="Shortcut+S"/>
+                            <MenuItem text="Save As..." onAction="#handleSaveAs" accelerator="Shortcut+Shift+S"/>
+                            <SeparatorMenuItem/>
+                            <MenuItem text="Exit" onAction="#handleExit"/>
+                        </items>
+                    </Menu>
+                    
+                    <Menu text="Edit">
+                        <items>
+                            <MenuItem text="Undo" onAction="#handleUndo" accelerator="Shortcut+Z"/>
+                            <MenuItem text="Redo" onAction="#handleRedo" accelerator="Shortcut+Shift+Z"/>
+                            <SeparatorMenuItem/>
+                            <MenuItem text="Cut" onAction="#handleCut" accelerator="Shortcut+X"/>
+                            <MenuItem text="Copy" onAction="#handleCopy" accelerator="Shortcut+C"/>
+                            <MenuItem text="Paste" onAction="#handlePaste" accelerator="Shortcut+V"/>
+                            <SeparatorMenuItem/>
+                            <MenuItem text="Delete Selected" onAction="#handleDelete" accelerator="Delete"/>
+                        </items>
+                    </Menu>
+                    
+                    <Menu text="Insert">
+                        <items>
+                            <Menu text="Structure">
+                                <items>
+                                    <MenuItem text="Section (div)" onAction="#insertDiv"/>
+                                    <MenuItem text="Heading (head)" onAction="#insertHead"/>
+                                </items>
+                            </Menu>
+                            <Menu text="Text Blocks">
+                                <items>
+                                    <MenuItem text="Paragraph (p)" onAction="#insertParagraph"/>
+                                    <MenuItem text="Line Group (lg)" onAction="#insertLg"/>
+                                    <MenuItem text="Speech (sp)" onAction="#insertSp"/>
+                                </items>
+                            </Menu>
+                            <Menu text="Lists &amp; Tables">
+                                <items>
+                                    <MenuItem text="List (list)" onAction="#insertList"/>
+                                    <MenuItem text="List Item (item)" onAction="#insertItem"/>
+                                    <MenuItem text="Table (table)" onAction="#insertTable"/>
+                                </items>
+                            </Menu>
+                            <Menu text="Inline Elements">
+                                <items>
+                                    <MenuItem text="Name (name)" onAction="#insertName"/>
+                                    <MenuItem text="Date (date)" onAction="#insertDate"/>
+                                    <MenuItem text="Highlight (hi)" onAction="#insertHi"/>
+                                </items>
+                            </Menu>
+                        </items>
+                    </Menu>
+                    
+                    <Menu text="Export">
+                        <items>
+                            <MenuItem text="HTML" onAction="#exportHtml"/>
+                            <MenuItem text="PDF (via XSL-FO)" onAction="#exportPdf"/>
+                            <SeparatorMenuItem/>
+                            <MenuItem text="Markdown" onAction="#exportMarkdown"/>
+                            <MenuItem text="LaTeX" onAction="#exportLatex"/>
+                            <MenuItem text="EPUB3" onAction="#exportEpub"/>
+                            <MenuItem text="Docx" onAction="#exportDocx"/>
+                            <MenuItem text="BibTeX" onAction="#exportBibtex"/>
+                        </items>
+                    </Menu>
+                </menus>
+            </MenuBar>
+            
+            <ToolBar>
+                <Button text="Validate XML" onAction="#validateXml"/>
+                <Button fx:id="viewToggleBtn" text="View: Visual Only" onAction="#handleToggleView"/> 
+                <Separator orientation="VERTICAL" />
+                <ToggleButton fx:id="sidebarToggleBtn" text="Tag Palette" selected="true" onAction="#handleToggleSidebar"/>
+                <Separator orientation="VERTICAL" />
+                <Label fx:id="statusLabel" text="Ready"/>
+            </ToolBar>
+        </VBox>
+    </top>
+    
+    <left>
+        <VBox fx:id="sidebar" prefWidth="250" style="-fx-background-color: #f4f4f4; -fx-border-color: #cccccc; -fx-border-width: 0 1 0 0;">
+            <Label text="Available Tags" style="-fx-font-weight: bold; -fx-padding: 10;">
+                <padding><Insets top="5" right="5" bottom="5" left="5"/></padding>
+            </Label>
+            <Accordion fx:id="tagAccordion" VBox.vgrow="ALWAYS"/>
+        </VBox>
+    </left>
+    
+    <center>
+        <SplitPane fx:id="mainSplitPane" dividerPositions="0.5">
+            <items>
+                <VBox fx:id="visualContainer">
+                    <Label text="Visual Editor" style="-fx-padding: 5; -fx-font-weight: bold;"/>
+                    <WebView fx:id="visualWebView" VBox.vgrow="ALWAYS"/>
+                </VBox>
+                
+                <VBox fx:id="codeContainer">
+                    <Label text="Raw TEI XML" style="-fx-padding: 5; -fx-font-weight: bold;"/>
+                    <TextArea fx:id="codeEditor" VBox.vgrow="ALWAYS" style="-fx-font-family: 'Monospaced';"/>
+                </VBox>
+            </items>
+        </SplitPane>
+    </center>
+</BorderPane>

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>TEI Visual Editor</title>
+		<style>
+			body { font-family: 'Segoe UI', sans-serif; padding: 20px; background-color: #f4f4f4; -webkit-user-select: text; user-select: none; }
+			
+			#editor-canvas {
+				min-height: 500px;
+				background: white;
+				padding: 40px;
+				border: 1px solid #ccc;
+				box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+				outline: none;
+				position: relative;
+			}
+			
+			/* --- TEI Element Styling --- */
+			.tei-element {
+				display: block;
+				border: 1px solid #cbd5e1;
+				border-radius: 6px;
+				padding: 10px;
+				margin: 8px 0;
+				background-color: #fff;
+				position: relative;
+				border-left: 4px solid #3b82f6;
+				cursor: grab;
+			}
+			
+			.tei-element:hover { box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+			
+			.tei-element.selected {
+				border: 2px solid #f97316;
+				background-color: #fff7ed;
+			}
+			.tei-element.selected::before { background-color: #f97316; }
+			
+			.tei-element::before {
+				content: attr(data-tag);
+				display: inline-block;
+				background-color: #3b82f6;
+				color: white;
+				font-size: 11px;
+				text-transform: uppercase;
+				font-weight: bold;
+				padding: 2px 6px;
+				border-radius: 4px;
+				margin-bottom: 6px;
+				margin-right: 10px;
+			}
+			
+			/* Category Colors */
+			.tei-element[data-tag="teiHeader"] { border-left-color: #64748b; }
+			.tei-element[data-tag="teiHeader"]::before { background-color: #64748b; }
+			.tei-element[data-tag="div"] { border-left-color: #8b5cf6; }
+			.tei-element[data-tag="div"]::before { background-color: #8b5cf6; }
+			.tei-element[data-tag="p"] { border-left-color: #10b981; }
+			.tei-element[data-tag="p"]::before { background-color: #10b981; }
+			
+			/* Content Text */
+			.content-node {
+				display: inline-block;
+				min-width: 20px;
+				padding: 2px;
+				border-bottom: 1px dotted #ccc;
+				cursor: text;
+				-webkit-user-select: text;
+				user-select: text;
+			}
+			.content-node:focus { background: #eff6ff; outline: none; border-bottom: 2px solid #3b82f6;}
+			
+			/* --- DRAG GHOST --- */
+			.drag-ghost {
+				position: fixed;
+				pointer-events: none;
+				z-index: 9999;
+				opacity: 0.8;
+				background: white;
+				border: 1px solid #3b82f6;
+				box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+				transform: rotate(2deg);
+				width: 300px;
+				overflow: hidden;
+				height: 50px;
+			}
+			
+			/* --- DROP TARGET ZONES --- */
+			.drop-target-before { border-top: 4px solid #f59e0b !important; }
+			.tei-element.drop-target-after { border-bottom: 4px solid #f59e0b !important; margin-bottom: 4px; }
+			.tei-element.drop-target-inside { background-color: #e0f2fe !important; border: 2px dashed #3b82f6 !important; }
+		</style>
+	</head>
+	<body>
+
+		<div id="editor-canvas" tabindex="0"></div>
+
+		<script>
+			const editor = document.getElementById('editor-canvas');
+			let selectedElement = null;
+			let idCounter = 0;
+			
+			// --- DRAG STATE ---
+			let isDragging = false;
+			let dragSource = null;
+			let dragGhost = null;
+			let currentTarget = null;
+			let dropPosition = null;
+			
+			const CONTAINER_TAGS = ['body', 'div', 'list', 'table', 'row', 'choice', 'front', 'back', 'titlePage', 'sourceDesc', 'fileDesc', 'projectDesc'];
+			
+			// --- JAVA HELPER ---
+			function isEditingText() {
+				const active = document.activeElement;
+				return active && active.classList.contains('content-node');
+			}
+			
+			// --- COPY / PASTE HELPERS ---
+			function getSelectedXml() {
+				if (selectedElement) {
+					return walkVisualNode(selectedElement);
+				}
+				return "";
+			}
+			
+			function pasteXml(xmlString) {
+				const parser = new DOMParser();
+				const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+				if (xmlDoc.querySelector("parsererror")) return; // Invalid XML
+				
+				const newVisual = createVisualNode(xmlDoc.documentElement);
+				if (!newVisual) return;
+				
+				// Insert Logic (Same as manual Insert)
+				let target = selectedElement || document.querySelector('[data-tag="body"]') || editor;
+				
+				// If target is text, append to parent container
+				if (target.nodeType === Node.TEXT_NODE || target.classList.contains('content-node')) {
+					target = target.parentNode;
+				}
+				
+				// If target is a container element (div/body), append inside
+				if (target.classList.contains('tei-element') && CONTAINER_TAGS.includes(target.dataset.tag)) {
+					target.appendChild(newVisual);
+					} else if (target === editor) {
+						target.appendChild(newVisual);
+						} else {
+							// Otherwise insert after
+							target.parentNode.insertBefore(newVisual, target.nextSibling);
+						}
+						
+						selectElement(newVisual);
+						notifyJava();
+					}
+					
+					// ==========================================
+					// PARSING (XML -> VISUAL)
+					// ==========================================
+					function renderFromXml(xmlString) {
+						const parser = new DOMParser();
+						const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+						if (xmlDoc.querySelector("parsererror")) return;
+						editor.innerHTML = '';
+						editor.appendChild(createVisualNode(xmlDoc.documentElement));
+					}
+					
+					function createVisualNode(xmlNode) {
+						if (xmlNode.nodeType === Node.TEXT_NODE) {
+							if (xmlNode.textContent.trim().length === 0) return null;
+							const span = document.createElement('span');
+							span.className = 'content-node';
+							span.contentEditable = "true";
+							span.textContent = xmlNode.textContent;
+							
+							span.addEventListener('input', () => notifyJava());
+							span.addEventListener('mousedown', (e) => e.stopPropagation());
+							return span;
+						}
+						
+						if (xmlNode.nodeType === Node.ELEMENT_NODE) {
+							const div = document.createElement('div');
+							div.className = 'tei-element';
+							div.setAttribute('data-tag', xmlNode.tagName);
+							div.id = "node-" + (idCounter++);
+							
+							const attrs = {};
+							for (let i = 0; i < xmlNode.attributes.length; i++) {
+								const attr = xmlNode.attributes[i];
+								attrs[attr.name] = attr.value;
+							}
+							div.teiAttributes = attrs;
+							
+							div.addEventListener('mousedown', onMouseDown);
+							
+							xmlNode.childNodes.forEach(child => {
+								const visualChild = createVisualNode(child);
+								if (visualChild) div.appendChild(visualChild);
+								});
+								return div;
+							}
+							return null;
+						}
+						
+						// ==========================================
+						// SERIALIZING (VISUAL -> XML)
+						// ==========================================
+						function serializeDom() {
+							let xml = "";
+							Array.from(editor.childNodes).forEach(node => {
+								xml += walkVisualNode(node);
+								});
+								return xml;
+							}
+							
+							function walkVisualNode(node) {
+								if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('content-node')) {
+									return escapeXml(node.innerText);
+								}
+								
+								if (node.nodeType === Node.ELEMENT_NODE && node.classList.contains('tei-element')) {
+									const tagName = node.getAttribute('data-tag');
+									
+									let attrString = "";
+									if (node.teiAttributes) {
+										for (const [key, value] of Object.entries(node.teiAttributes)) {
+											attrString += ` ${key}="${escapeXml(value)}"`;
+										}
+									}
+									
+									let childrenXml = "";
+									Array.from(node.childNodes).forEach(child => {
+										childrenXml += walkVisualNode(child);
+										});
+										
+										return `<${tagName}${attrString}>${childrenXml}</${tagName}>`;
+									}
+									return "";
+								}
+								
+								function escapeXml(unsafe) {
+									if (!unsafe) return "";
+									return unsafe.replace(/[<>&'"]/g, function (c) {
+										switch (c) {
+											case '<': return '&lt;';
+											case '>': return '&gt;';
+											case '&': return '&amp;';
+											case '\'': return '&apos;';
+											case '"': return '&quot;';
+										}
+										});
+									}
+									
+									function notifyJava() {
+										if (window.javaBridge) {
+											const fullXml = serializeDom();
+											window.javaBridge.updateFromVisual(fullXml);
+										}
+									}
+									
+									// ==========================================
+									// INTERACTION
+									// ==========================================
+									function selectElement(el) {
+										if (selectedElement) selectedElement.classList.remove('selected');
+										selectedElement = el;
+										if (selectedElement) {
+											selectedElement.classList.add('selected');
+											selectedElement.focus();
+										}
+									}
+									
+									function deleteSelectedElement() {
+										if (selectedElement && selectedElement.parentNode) {
+											selectedElement.parentNode.removeChild(selectedElement);
+											selectedElement = null;
+											notifyJava();
+										}
+									}
+									
+									function insertTeiElement(tagName) {
+										const el = document.createElement('div');
+										el.className = 'tei-element';
+										el.setAttribute('data-tag', tagName);
+										el.id = "node-" + (idCounter++);
+										el.teiAttributes = {};
+										el.addEventListener('mousedown', onMouseDown);
+										
+										const text = document.createElement('span');
+										text.className = 'content-node';
+										text.contentEditable = "true";
+										el.appendChild(text);
+										
+										let target = selectedElement || document.querySelector('[data-tag="body"]') || editor;
+										target.appendChild(el);
+										selectElement(el);
+										notifyJava();
+									}
+									
+									// ==========================================
+									// SYNTHETIC DRAG AND DROP
+									// ==========================================
+									
+									function onMouseDown(e) {
+										if (e.button !== 0) return;
+										e.stopPropagation();
+										
+										selectElement(this);
+										
+										isDragging = true;
+										dragSource = this;
+										
+										dragGhost = this.cloneNode(true);
+										dragGhost.classList.add('drag-ghost');
+										dragGhost.removeAttribute('id');
+										document.body.appendChild(dragGhost);
+										
+										moveGhost(e.clientX, e.clientY);
+										
+										document.addEventListener('mousemove', onMouseMove);
+										document.addEventListener('mouseup', onMouseUp);
+									}
+									
+									function onMouseMove(e) {
+										if (!isDragging) return;
+										e.preventDefault();
+										
+										moveGhost(e.clientX, e.clientY);
+										
+										let elemBelow = document.elementFromPoint(e.clientX, e.clientY);
+										let targetBox = elemBelow ? elemBelow.closest('.tei-element') : null;
+										
+										if (targetBox === dragSource || (dragSource && dragSource.contains(targetBox))) {
+											clearHighlights();
+											currentTarget = null;
+											return;
+										}
+										
+										if (targetBox) {
+											currentTarget = targetBox;
+											const rect = targetBox.getBoundingClientRect();
+											const relY = e.clientY - rect.top;
+											
+											clearHighlights();
+											
+											if (relY < rect.height * 0.25) {
+												dropPosition = 'before';
+												targetBox.classList.add('drop-target-before');
+												} else if (relY > rect.height * 0.75) {
+													dropPosition = 'after';
+													targetBox.classList.add('drop-target-after');
+													} else {
+														if (CONTAINER_TAGS.includes(targetBox.dataset.tag)) {
+															dropPosition = 'inside';
+															targetBox.classList.add('drop-target-inside');
+															} else {
+																dropPosition = 'after';
+																targetBox.classList.add('drop-target-after');
+															}
+														}
+														} else {
+															clearHighlights();
+															currentTarget = null;
+														}
+													}
+													
+													function onMouseUp(e) {
+														if (!isDragging) return;
+														
+														if (currentTarget && dragSource) {
+															if (dropPosition === 'before') {
+																currentTarget.parentNode.insertBefore(dragSource, currentTarget);
+																} else if (dropPosition === 'after') {
+																	currentTarget.parentNode.insertBefore(dragSource, currentTarget.nextSibling);
+																	} else if (dropPosition === 'inside') {
+																		currentTarget.appendChild(dragSource);
+																	}
+																	notifyJava();
+																}
+																
+																if (dragGhost) dragGhost.remove();
+																clearHighlights();
+																
+																isDragging = false;
+																dragSource = null;
+																dragGhost = null;
+																currentTarget = null;
+																
+																document.removeEventListener('mousemove', onMouseMove);
+																document.removeEventListener('mouseup', onMouseUp);
+															}
+															
+															function moveGhost(x, y) {
+																if (dragGhost) {
+																	dragGhost.style.left = (x + 10) + 'px';
+																	dragGhost.style.top = (y + 10) + 'px';
+																}
+															}
+															
+															function clearHighlights() {
+																document.querySelectorAll('.tei-element').forEach(el => {
+																	el.classList.remove('drop-target-before', 'drop-target-after', 'drop-target-inside');
+																	});
+																}
+		</script>
+	</body>
+</html>

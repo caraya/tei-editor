@@ -1,0 +1,115 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+}
+
+group = 'com.teieditor'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+javafx {
+    version = "21.0.1"
+    modules = [ 'javafx.controls', 'javafx.fxml', 'javafx.web', 'javafx.swing' ]
+}
+
+application {
+    // Update to the Launcher
+    mainClass = 'com.teieditor.Launcher'
+}
+
+// --- FORCE MANIFEST ---
+// This guarantees the JAR file itself knows to start with Launcher
+jar {
+    manifest {
+        attributes(
+            'Main-Class': 'com.teieditor.Launcher'
+        )
+    }
+}
+
+dependencies {
+    implementation 'org.relaxng:jing:20241231'
+    implementation 'net.sf.saxon:Saxon-HE:12.3'
+    implementation 'org.apache.xmlgraphics:fop:2.9'
+    implementation 'org.apache.ant:ant:1.10.14'
+    
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.0'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// --- CUSTOM PACKAGING ---
+
+task stage(type: Copy) {
+    dependsOn build
+    from jar
+    from configurations.runtimeClasspath
+    into "${buildDir}/staging"
+}
+
+task jpackage(type: Exec) {
+    dependsOn stage
+    group = "distribution"
+    description = "Builds a native installer"
+
+    def currentOs = org.gradle.internal.os.OperatingSystem.current()
+    def installerType = "app-image"
+    def iconPath = "packaging/icon.png"
+
+    if (currentOs.isMacOsX()) {
+        installerType = "dmg"
+        iconPath = "packaging/icon.icns"
+    } else if (currentOs.isWindows()) {
+        installerType = "exe"
+        iconPath = "packaging/icon.ico"
+    } else if (currentOs.isLinux()) {
+        installerType = "deb"
+    }
+
+    def jpackagePath = javaToolchains.compilerFor(java.toolchain).get()
+                        .metadata.installationPath.file("bin/jpackage").asFile.absolutePath
+
+    def outputDir = "${buildDir}/jpackage"
+    file(outputDir).mkdirs()
+
+    commandLine = [
+        jpackagePath,
+        '--type', installerType,
+        '--dest', outputDir,
+        '--input', "${buildDir}/staging",
+        '--name', 'TEIEditor',
+        '--main-class', 'com.teieditor.Launcher', // Checked and Correct
+        '--main-jar', jar.archiveFileName.get(),
+        '--java-options', '-Xmx2048m',
+        '--app-version', version,
+        '--icon', iconPath
+    ]
+    
+    if (currentOs.isWindows()) {
+        args '--win-dir-chooser'
+        args '--win-menu'
+        args '--win-shortcut'
+    }
+    
+    if (currentOs.isLinux()) {
+        args '--linux-shortcut'
+    }
+    
+    doFirst {
+        println "Building Installer..."
+        println "Entry Point: com.teieditor.Launcher"
+    }
+}
