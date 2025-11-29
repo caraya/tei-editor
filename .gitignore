@@ -11,6 +11,8 @@
 .mtj.tmp/
 
 # Package Files #
+# Allow the Gradle wrapper JAR to be committed & available in CI
+!gradle/wrapper/gradle-wrapper.jar
 *.jar
 *.war
 *.nar
